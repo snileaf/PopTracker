@@ -1,4 +1,5 @@
 #include "defaulttrackerwindow.h"
+#include "../packmanager/packmanager.h"
 #include "../uilib/dlg.h"
 #include "../uilib/hbox.h"
 #include "../core/assets.h"
@@ -62,7 +63,7 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
             onMenuPressed.emit(this, MENU_ALWAYS_ON_TOP, 0);
         }};
     }
-    
+
     _btnPackSettings = new ImageButton(32-4,0,32-4,32-4, asset("settings.png"));
     _btnPackSettings->setVisible(false);
     hbox->addChild(_btnPackSettings);
@@ -140,6 +141,16 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
             _lblTooltip->setText("");
         }};
     }
+}
+
+void DefaultTrackerWindow::setPackManager(PackManager* packManager)
+{
+    _loadPackWidget->setPackManager(packManager);
+}
+
+void DefaultTrackerWindow::refreshPackList()
+{
+    _loadPackWidget->update();
 }
 
 DefaultTrackerWindow::~DefaultTrackerWindow()

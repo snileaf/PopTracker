@@ -52,6 +52,15 @@ public:
     }
 
     void getAvailablePacks(std::function<void(const json&)> cb);
+    void refreshAvailablePacks(std::function<void(const json&)> cb) {
+        for (auto& repository : _repositories) repository.second = false;
+        _packs = json::object();
+        getAvailablePacks(std::move(cb));
+    }
+    std::string getAvailablePackName(const std::string& uid) const {
+        const auto it = _packs.find(uid);
+        return it != _packs.end() ? it.value().value("name", uid) : uid;
+    }
     void ignoreUpdateSHA256(const std::string& uid, const std::string& sha256);
     void tempIgnoreSourceVersion(const std::string& uid, const std::string& version);
     void downloadUpdate(const std::string& url, const fs::path& install_dir,

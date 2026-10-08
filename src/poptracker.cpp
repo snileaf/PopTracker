@@ -426,7 +426,7 @@ PopTracker::PopTracker([[maybe_unused]] int argc, [[maybe_unused]] char** argv, 
 
     _packManager = new PackManager(_asio, getConfigPath(APPNAME, "", _isPortable), _httpDefaultHeaders);
     // TODO: move repositories to config?
-    _packManager->addRepository("https://raw.githubusercontent.com/black-sliver/PopTracker/packlist/community-packs.json");
+    _packManager->addRepository("https://raw.githubusercontent.com/poptracker-community/community-packlist/main/community-packs.json");
     // NOTE: signals are connected later to allow gui and non-gui interaction
 
 #ifndef WITHOUT_UPDATE_CHECK
@@ -630,6 +630,7 @@ bool PopTracker::start()
         { "show_always_on_top_button", showAlwaysOnTopButton },
     });
     _win = _ui->createWindow<Ui::DefaultTrackerWindow>("PopTracker", icon, pos, size, windowConfig);
+    _win->setPackManager(_packManager);
     _win->setAlwaysOnTop(alwaysOnTop);
     SDL_FreeSurface(icon);
 	
@@ -913,7 +914,17 @@ bool PopTracker::start()
         cb(Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) == Dlg::Result::Yes);
     });
     _packManager->onUpdateAvailable += {this, [this](void*, const std::string& uid, const std::string& version, const std::string& url, const std::string& sha256) {
-        if (!_pack || _pack->getUID() != uid) return;
+        if (!_pack || _pack->getUID() != uid) {
+            if (version.empty() || url.empty() || sha256.empty()) return;
+            const std::string name = _packManager->getAvailablePackName(uid);
+            const std::string msg = "Install " + name + " from the community pack list?";
+            if (Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) == Dlg::Result::Yes) {
+                const auto& installDir = getPackInstallDir();
+                fs::create_directories(installDir);
+                _packManager->downloadUpdate(url, installDir, uid, version, sha256);
+            }
+            return;
+        }
         if (version.empty() || url.empty() || sha256.empty()) {
             printf("Invalid update information\n");
             return;
@@ -949,8 +960,9 @@ bool PopTracker::start()
     _packManager->onUpdateComplete += {this, [this](void*, const std::string& url, const fs::path& file, const std::string& uid) {
         (void)url;
         _win->hideProgress();
+        const bool updatingCurrentPack = _pack && _pack->getUID() == uid;
         std::string variant = _pack ? _pack->getVariant() : "";
-        if (_pack && _pack->getUID() == uid) {
+        if (updatingCurrentPack) {
             // FIXME: probably should capture which pack started the update
             auto oldPath = _pack->getPath();
             unloadTracker();
@@ -982,7 +994,10 @@ bool PopTracker::start()
                 }
             }
         }
-        loadTracker(file, variant);
+        if (updatingCurrentPack)
+            loadTracker(file, variant);
+        else if (_win)
+            _win->refreshPackList();
     }};
 
     _frameTimer = std::chrono::steady_clock::now();

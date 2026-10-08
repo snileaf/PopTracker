@@ -6,6 +6,8 @@
 #include "../uilib/progressbar.h"
 #include <vector>
 
+class PackManager;
+
 namespace Ui {
 
 class DefaultTrackerWindow : public TrackerWindow {
@@ -25,6 +27,8 @@ public:
     virtual void showProgress(const std::string& title, int progress, int max);
     virtual void hideProgress();
     virtual void setAlwaysOnTop(bool alwaysOnTop) override;
+    void setPackManager(PackManager* packManager);
+    void refreshPackList();
     
     Signal<const fs::path&, const std::string&> onPackSelected;
     

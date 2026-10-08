@@ -18,6 +18,8 @@
 #include "../core/pack.h"
 #include <vector>
 
+class PackManager;
+
 namespace Ui {
 
 class Window;
@@ -28,6 +30,7 @@ public:
     LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore, Window *window=nullptr);
     
     void update();
+    void setPackManager(PackManager* packManager) { _packManager = packManager; }
     void focusFilter();
     void releaseFilterFocus();
     
@@ -41,6 +44,7 @@ protected:
     FONT _smallFont;
     
     Window *_window;
+    PackManager *_packManager = nullptr;
     VBox *_root = nullptr;
     HBox *_filterBar = nullptr;
     TextField *_filter = nullptr;
@@ -55,6 +59,8 @@ protected:
     Label *_curPackHover = nullptr;
     bool _disableHoverSelect = false;
     std::vector<Pack::Info> _availablePacks;
+    std::vector<Pack::Info> _remotePacks;
+    std::vector<Widget*> _packRows;
 
     void refreshPacks();
 

@@ -1,4 +1,5 @@
 #include "loadpackwidget.h"
+#include "../packmanager/packmanager.h"
 #include "../core/pack.h"
 #include "../core/assets.h"
 #include "../core/util.h"
@@ -11,6 +12,7 @@
 #include <SDL2/SDL.h>
 #include <fmt/format.h>
 #include <cctype>
+#include <algorithm>
 
 namespace Ui {
 
@@ -152,8 +154,26 @@ void LoadPackWidget::releaseFilterFocus()
 void LoadPackWidget::update()
 {
     _availablePacks = Pack::ListAvailable();
+    _remotePacks.clear();
     if (_filter) _filter->clear();
     refreshPacks();
+    if (_packManager) {
+        _packManager->refreshAvailablePacks([this](const nlohmann::json& packs) {
+            for (const auto& [uid, data] : packs.items()) {
+                if (std::any_of(_availablePacks.begin(), _availablePacks.end(), [&uid](const Pack::Info& pack) {
+                        return pack.uid == uid;
+                    }))
+                    continue;
+                Pack::Info info;
+                info.uid = uid;
+                info.packName = data.value("name", uid);
+                info.gameName = info.packName;
+                info.platform = data.value("platform", "");
+                _remotePacks.push_back(std::move(info));
+            }
+            refreshPacks();
+        });
+    }
 }
 
 // ASCII-only case folding, for case-insensitive substring matching.
@@ -168,6 +188,7 @@ void LoadPackWidget::refreshPacks()
 {
     _packs->clearChildren();
     _variants->clearChildren();
+    _packRows.clear();
     _curPackHover = nullptr;
     _curPackLabel = nullptr;
     _curVariantLabel = nullptr;
@@ -177,7 +198,9 @@ void LoadPackWidget::refreshPacks()
     if (_filter) filter = toLower(_filter->getText());
 
     int shown = 0;
-    for (auto& pack : _availablePacks) {
+    std::vector<Pack::Info> packs = _availablePacks;
+    packs.insert(packs.end(), _remotePacks.begin(), _remotePacks.end());
+    for (auto& pack : packs) {
         const std::string packLabel = " " + pack.packName + " " + pack.version;
         if (!filter.empty()) {
             const bool match = toLower(packLabel).find(filter) != std::string::npos
@@ -186,13 +209,28 @@ void LoadPackWidget::refreshPacks()
                 continue;
         }
         shown++;
-        auto lbl = new Label(0, 0, 0, 0, _font, packLabel); // TODO: button instead of label
+
+        // Create a pack row container with label and icon
+        auto row = new HBox(0, 0, 0, 32);
+        row->setSpacing(0);
+        row->setPadding(0);
+
+        auto lbl = new Label(0, 0, 0, 32, _font, packLabel); // TODO: button instead of label
         lbl->setGrow(1,0);
         lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
         lbl->setMinSize({64,lbl->getAutoHeight()});
-        lbl->setSize({_size.width/2,32}); // TODO; hbox with even split instead
+        lbl->setSize({_size.width/2 - 24, 32});  // Leave room for icon
         lbl->setBackground(PACK_BG_DEFAULT);
-        _packs->addChild(lbl);
+
+        auto icon = new ImageButton(0, 0, 24, 0,
+                asset(pack.path.empty() ? "open.png" : "closed.png"));
+        icon->setGrow(0,0);
+        icon->setMinSize({24, 24});
+
+        row->addChild(lbl);
+        row->addChild(icon);
+        _packs->addChild(row);
+        _packRows.push_back(row);
 
         lbl->onMouseEnter += {this,[this,pack](void* s, int, int, unsigned) {
             if (_curPackHover != s) {
@@ -249,12 +287,18 @@ void LoadPackWidget::refreshPacks()
             _main->relayout(); // fix split in hbox // FIXME: this should not be required
         }};
 
-        lbl->onClick += {this, [this](void* s, int x, int y, int buttons) {
+        icon->onClick += {this, [lbl](void*, int x, int y, int buttons) {
+            lbl->onClick.emit(lbl, x, y, buttons);
+        }};
+        lbl->onClick += {this, [this, pack](void* s, int x, int y, int buttons) {
             _disableHoverSelect = false;
             ((Label*)s)->onMouseEnter.emit(s, x, y, (unsigned)buttons);
             _disableHoverSelect = true;
             if (_curPackLabel)
                 _curPackLabel->setBackground(PACK_BG_ACTIVE_HOVER);
+            if (buttons == MouseButton::BUTTON_LEFT && pack.path.empty() && _packManager) {
+                _packManager->checkForUpdate(pack.uid, "", "");
+            }
         }};
     }
 
@@ -262,11 +306,10 @@ void LoadPackWidget::refreshPacks()
         const char* msg = _availablePacks.empty() ?
             "No packs installed!\nDrag & drop packs into the window to install them." :
             "No packs found!";
-        auto* lbl = new Label(0, 0, 0, 0, _font, msg);
-        lbl->setGrow(1,1);
+        auto* lbl = new Label(0, 0, 0, 32, _font, msg);
+        lbl->setGrow(1,0);
         lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
-        lbl->setMinSize(lbl->getAutoSize());
-        lbl->setSize({_size.width/2,32}); // TODO; hbox with even split instead
+        lbl->setBackground(PACK_BG_DEFAULT);
         _packs->addChild(lbl);
         auto* spacer = new Label(0, 0, 0, 0, nullptr, "");
         spacer->setGrow(1,1);
@@ -278,9 +321,18 @@ void LoadPackWidget::refreshPacks()
 void LoadPackWidget::setSize(Size size)
 {
     SimpleContainer::setSize(size);
-    // TODO: have more intelligent hbox instead
-    _packs->setWidth(size.width/2-1);
-    _variants->setWidth(size.width/2-1);
+    int halfWidth = size.width/2 - 1;
+    _packs->setWidth(halfWidth);
+    _variants->setWidth(halfWidth);
+
+    for (auto* row : _packRows) {
+        row->setWidth(halfWidth);
+    }
+
+    for (auto* child : _variants->getChildren()) {
+        child->setWidth(halfWidth);
+    }
+
     _main->relayout();
 }
 
