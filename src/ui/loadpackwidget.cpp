@@ -159,7 +159,9 @@ void LoadPackWidget::update()
     refreshPacks();
     if (_packManager) {
         _packManager->refreshAvailablePacks([this](const nlohmann::json& packs) {
-            for (const auto& [uid, data] : packs.items()) {
+            for (const auto& item : packs.items()) {
+                const auto& uid = item.key();
+                const auto& data = item.value();
                 if (std::any_of(_availablePacks.begin(), _availablePacks.end(), [&uid](const Pack::Info& pack) {
                         return pack.uid == uid;
                     }))
