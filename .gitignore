@@ -53,3 +53,4 @@ macosx/libs/
 # exclude development environment specific files
 .vs/
 CppProperties.json
+/CHANGES.md
