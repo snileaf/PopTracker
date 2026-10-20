@@ -31,6 +31,8 @@ public:
     void refreshPackList();
     
     Signal<const fs::path&, const std::string&> onPackSelected;
+
+    Signal<const std::string&, const std::string&, const std::string&, const std::string&> onRemotePackVersionSelected;
     
 protected:
     ImageButton *_btnLoad = nullptr;

@@ -28,31 +28,39 @@ class LoadPackWidget : public SimpleContainer {
 public:
     using FONT = FontStore::FONT;
     LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore, Window *window=nullptr);
-    
+
+    /// Full refresh (called when the widget is opened): rescans local packs, refetches remote list if shown.
     void update();
+    /// Rescan installed packs only (e.g. after a download finished). Keeps filter and mode.
+    void updateInstalled();
     void setPackManager(PackManager* packManager) { _packManager = packManager; }
     void focusFilter();
     void releaseFilterFocus();
-    
+
     Signal<const fs::path&, const std::string&> onPackSelected;
+    /// uid, version, download url, sha256
+    Signal<const std::string&, const std::string&, const std::string&, const std::string&> onRemoteVersionSelected;
 
     virtual void setSize(Size size) override; // TODO: have more intelligent hbox instead
-    
+
 protected:
+    enum class Mode { Local, Remote };
+
     FontStore *_fontStore;
     FONT _font;
     FONT _smallFont;
-    
+
     Window *_window;
     PackManager *_packManager = nullptr;
     VBox *_root = nullptr;
     HBox *_filterBar = nullptr;
     TextField *_filter = nullptr;
     Button *_btnClearFilter = nullptr;
+    Button *_btnSwitchList = nullptr;
     ImageButton *_btnOpenFolder = nullptr;
-    
+
     ScrollVBox *_packs;
-    VBox *_variants;
+    VBox *_variants; // variants (local) or versions (remote)
     HBox *_main;
     Label *_curPackLabel = nullptr;
     Label *_curVariantLabel = nullptr;
@@ -60,9 +68,16 @@ protected:
     bool _disableHoverSelect = false;
     std::vector<Pack::Info> _availablePacks;
     std::vector<Pack::Info> _remotePacks;
-    std::vector<Widget*> _packRows;
+
+    Mode _mode = Mode::Local; // local list is the default
+    bool _remoteLoaded = false;
+    bool _remoteLoading = false;
+    unsigned _remoteGen = 0; // invalidates stale async version requests
 
     void refreshPacks();
+    void setMode(Mode mode);
+    void loadRemotePacks();
+    void showRemoteVersions(const Pack::Info& pack);
 
     static constexpr Color PACK_BG_DEFAULT = {32, 32, 32};
     static constexpr Color PACK_BG_ACTIVE = {32, 128, 32};

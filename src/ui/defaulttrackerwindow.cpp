@@ -104,6 +104,10 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
         onPackSelected.emit(this,pack,variant);
     }};
     
+    _loadPackWidget->onRemoteVersionSelected += {this, [this](void*, const std::string& uid,
+        const std::string& version, const std::string& url, const std::string& sha256) {
+    onRemotePackVersionSelected.emit(this, uid, version, url, sha256);
+    }};
     for (const auto& pair : {
             std::pair{_btnLoad, "Load Pack"},
             std::pair{_btnReload, "Reload Pack"},
@@ -150,7 +154,7 @@ void DefaultTrackerWindow::setPackManager(PackManager* packManager)
 
 void DefaultTrackerWindow::refreshPackList()
 {
-    _loadPackWidget->update();
+    _loadPackWidget->updateInstalled();
 }
 
 DefaultTrackerWindow::~DefaultTrackerWindow()
