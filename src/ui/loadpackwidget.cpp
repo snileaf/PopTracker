@@ -329,105 +329,153 @@ void LoadPackWidget::refreshPacks()
         std::string packLabel = " " + pack.packName;
         if (!pack.version.empty())
             packLabel += " " + pack.version;
-        if (!pack.author.empty())
-            packLabel += " by " + pack.author;
+
+        const std::string authorLabel =
+            pack.author.empty() ? "" : "Made by " + pack.author;
+
         if (!filter.empty()) {
-            const bool match = toLower(packLabel).find(filter) != std::string::npos
+            const bool match = toLower(packLabel + " " + authorLabel).find(filter)
+                            != std::string::npos
                             || toLower(pack.gameName).find(filter) != std::string::npos;
             if (!match)
                 continue;
         }
+
         shown++;
 
-        auto lbl = new Label(0, 0, 0, 0, _font, packLabel); // TODO: button instead of label
-        lbl->setGrow(1,0);
+        auto row = new HBox(0, 0, 0, 0);
+        row->setGrow(1, 0);
+        row->setPadding(0);
+        row->setSpacing(0);
+        row->setHeight(32);
+
+        auto lbl = new Label(0, 0, 0, 0, _font, packLabel);
+        lbl->setGrow(1, 0);
         lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
-        lbl->setMinSize({64,lbl->getAutoHeight()});
-        lbl->setSize({_size.width/2,32}); // TODO; hbox with even split instead
+        lbl->setMinSize({64, lbl->getAutoHeight()});
         lbl->setBackground(PACK_BG_DEFAULT);
-        _packs->addChild(lbl);
+
+        auto author = new Label(0, 0, 0, 0, _smallFont, authorLabel);
+        author->setGrow(0, 0);
+        author->setTextAlignment(Label::HAlign::RIGHT, Label::VAlign::MIDDLE);
+        author->setMinSize({0, author->getAutoHeight()});
+        author->setBackground(PACK_BG_DEFAULT);
+
+        lbl->setSize({0, 32});
+        author->setSize({0, 32});
+
+        row->addChild(lbl);
+        row->addChild(author);
+        _packs->addChild(row);
+
+        auto setRowBackground = [lbl, author](Color color) {
+            lbl->setBackground(color);
+            author->setBackground(color);
+        };
 
         if (remote) {
-            // remote: click-to-select (versions are fetched asynchronously, so no hover-select)
-            lbl->onMouseEnter += {this, [this](void* s, int, int, unsigned) {
-                if (s != _curPackLabel) ((Label*)s)->setBackground(PACK_BG_HOVER);
+            row->onMouseEnter += {this, [this, lbl, setRowBackground](void*, int, int, unsigned) {
+                if (lbl != _curPackLabel)
+                    setRowBackground(PACK_BG_HOVER);
             }};
-            lbl->onMouseLeave += {this, [this](void* s) {
-                if (s != _curPackLabel) ((Label*)s)->setBackground(PACK_BG_DEFAULT);
+
+            row->onMouseLeave += {this, [this, lbl, setRowBackground](void*) {
+                if (lbl != _curPackLabel)
+                    setRowBackground(PACK_BG_DEFAULT);
             }};
-            lbl->onClick += {this, [this, pack](void* s, int, int, int button) {
-                if (button != MouseButton::BUTTON_LEFT) return;
-                if (_curPackLabel && _curPackLabel != s)
+
+            row->onClick += {this, [this, pack, lbl, setRowBackground](void*, int, int, int button) {
+                if (button != MouseButton::BUTTON_LEFT)
+                    return;
+
+                if (_curPackLabel && _curPackLabel != lbl)
                     _curPackLabel->setBackground(PACK_BG_DEFAULT);
-                _curPackLabel = (Label*)s;
-                _curPackLabel->setBackground(PACK_BG_ACTIVE_HOVER);
+
+                _curPackLabel = lbl;
+                setRowBackground(PACK_BG_ACTIVE_HOVER);
                 showRemoteVersions(pack);
             }};
+
             continue;
         }
 
-        // local: hover-select variants, click to lock selection
-        lbl->onMouseEnter += {this,[this,pack](void* s, int, int, unsigned) {
-            if (_curPackHover != s) {
+        // Local: hover-select variants, click to lock selection.
+        row->onMouseEnter += {this, [this, pack, lbl, setRowBackground](void*, int, int, unsigned) {
+            if (_curPackHover != lbl) {
                 if (_curPackHover == _curPackLabel && _disableHoverSelect)
                     _curPackHover->setBackground(PACK_BG_ACTIVE);
                 else if (_curPackHover)
                     _curPackHover->setBackground(PACK_BG_DEFAULT);
 
-                _curPackHover = (Label*)s;
+                _curPackHover = lbl;
+
                 if (_curPackHover == _curPackLabel && _disableHoverSelect)
-                    _curPackHover->setBackground(PACK_BG_ACTIVE_HOVER);
+                    setRowBackground(PACK_BG_ACTIVE_HOVER);
                 else
-                    _curPackHover->setBackground(PACK_BG_HOVER);
+                    setRowBackground(PACK_BG_HOVER);
             }
-            if (_disableHoverSelect || _curPackLabel == s)
+
+            if (_disableHoverSelect || _curPackLabel == lbl)
                 return;
 
             if (_curPackLabel)
                 _curPackLabel->setBackground(PACK_BG_DEFAULT);
 
-            _curPackLabel = (Label*)s;
+            _curPackLabel = lbl;
             _variants->clearChildren();
-            for (auto& variant: pack.variants) {
-                auto lbl = new Label(0,0,0,0, _font, " " + variant.name); // TODO: button instead of label
-                lbl->setGrow(1,0);
-                lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
-                lbl->setMinSize({64,lbl->getAutoHeight()});
-                lbl->setSize({_variants->getWidth(),32}); // FIXME: this should be done by vbox
-                lbl->setBackground(VARIANT_BG_DEFAULT);
-                _variants->addChild(lbl);
-                lbl->onMouseLeave += {this,[this,variant](void *s) {
-                    if (_curVariantLabel != s) return;
+
+            for (auto& variant : pack.variants) {
+                auto variantLabel = new Label(0, 0, 0, 0, _font, " " + variant.name);
+                variantLabel->setGrow(1, 0);
+                variantLabel->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
+                variantLabel->setMinSize({64, variantLabel->getAutoHeight()});
+                variantLabel->setSize({_variants->getWidth(), 32});
+                variantLabel->setBackground(VARIANT_BG_DEFAULT);
+                _variants->addChild(variantLabel);
+
+                variantLabel->onMouseLeave += {this, [this](void* s) {
+                    if (_curVariantLabel != s)
+                        return;
                     _curVariantLabel->setBackground(VARIANT_BG_DEFAULT);
                     _curVariantLabel = nullptr;
                 }};
+
                 auto path = pack.path;
-                lbl->onMouseEnter += {this,[this](void *s, int, int, unsigned) {
-                    if (!s || s==_curVariantLabel) return;
-                    if (_curVariantLabel) _curVariantLabel->onMouseLeave.emit(_curVariantLabel);
+
+                variantLabel->onMouseEnter += {this, [this](void* s, int, int, unsigned) {
+                    if (!s || s == _curVariantLabel)
+                        return;
+                    if (_curVariantLabel)
+                        _curVariantLabel->onMouseLeave.emit(_curVariantLabel);
                     _curVariantLabel = (Label*)s;
                     _curVariantLabel->setBackground(VARIANT_BG_HOVER);
                 }};
-                lbl->onClick += {this,[this,path,variant](void*, int, int, int button) {
-                    if (button == MouseButton::BUTTON_LEFT) {
-                        onPackSelected.emit(this,path,variant.variant);
-                    }
+
+                variantLabel->onClick += {this, [this, path, variant](void*, int, int, int button) {
+                    if (button == MouseButton::BUTTON_LEFT)
+                        onPackSelected.emit(this, path, variant.variant);
                 }};
             }
+
             auto spacer = new Label(0, 0, 0, 0, nullptr, "");
-            spacer->setGrow(1,1);
+            spacer->setGrow(1, 1);
             _variants->addChild(spacer);
-            _main->relayout(); // changes width of _variants
-            _variants->relayout(); // changes width of labels
-            _main->relayout(); // fix split in hbox // FIXME: this should not be required
+
+            _main->relayout();
+            _variants->relayout();
+            _main->relayout();
         }};
 
-        lbl->onClick += {this, [this](void* s, int x, int y, int buttons) {
+        row->onClick += {this, [this, lbl, row, setRowBackground](void*, int, int, int button) {
+        if (button != MouseButton::BUTTON_LEFT)
+                return;
+
             _disableHoverSelect = false;
-            ((Label*)s)->onMouseEnter.emit(s, x, y, (unsigned)buttons);
+            row->onMouseEnter.emit(row, 0, 0, (unsigned)button);
             _disableHoverSelect = true;
+
             if (_curPackLabel)
-                _curPackLabel->setBackground(PACK_BG_ACTIVE_HOVER);
+                setRowBackground(PACK_BG_ACTIVE_HOVER);
         }};
     }
 
