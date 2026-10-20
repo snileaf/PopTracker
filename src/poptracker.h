@@ -85,6 +85,8 @@ private:
     static int global_newindex(lua_State* L);
     static void global_wrap(lua_State* L, PopTracker* self);
 
+    void promptRemotePackList();
+
 public:
     PopTracker(int argc, char** argv, bool cli=false, const json& args=nullptr);
     virtual ~PopTracker();

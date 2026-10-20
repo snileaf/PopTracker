@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 #include <functional>
+#include <vector>
 #include "../http/http.h"
 #include "../http/httpcache.h"
 #include "../core/fs.h"
@@ -71,6 +72,22 @@ public:
     Signal<const std::string&, const fs::path&, const std::string&> onUpdateComplete;
     Signal<const std::string&, const std::string&> onUpdateFailed;
 
+    struct RemoteVersion {
+    std::string version;
+    std::string url;
+    std::string sha256;
+    std::vector<std::string> changelog;
+    };
+    typedef std::function<void(bool, const std::vector<RemoteVersion>&)> versions_callback;
+
+    bool hasRepositories() const { return !_repositories.empty(); }
+    void clearRepositories() { _repositories.clear(); _packs = json::object(); }
+    /// Fetches and validates a pack list; cb(true) if it is a valid pack list.
+    void testRepository(const std::string& url, std::function<void(bool)> cb);
+    /// Lists all downloadable versions of a pack from its versions.json (newest first as in the file).
+    void getPackVersions(const std::string& uid, versions_callback cb);
+
+
 private:
     void updateRepository(const std::string& url, std::function<void(bool)> cb, bool alreadyModified=false);
     void updateRepositories(std::function<void(bool)> cb);
@@ -81,6 +98,9 @@ private:
     void GetFile(const std::string& url, const fs::path& dest,
             std::function<void(bool,const std::string&)> cb,
             std::function<void(int,int)> progress, int followRedirect=3);
+    void resolveVersionsUrl(const std::string& uid, const std::string& versions_url,
+                        std::function<void(const std::string&)> cb); // cb("") on failure/denied
+
 
     fs::path _confFile;
     std::map<std::string, bool> _repositories;

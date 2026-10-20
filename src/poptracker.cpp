@@ -425,8 +425,14 @@ PopTracker::PopTracker([[maybe_unused]] int argc, [[maybe_unused]] char** argv, 
     HTTP::certFile = asset("cacert.pem").u8string(); // https://curl.se/docs/caextract.html
 
     _packManager = new PackManager(_asio, getConfigPath(APPNAME, "", _isPortable), _httpDefaultHeaders);
-    // TODO: move repositories to config?
-    _packManager->addRepository("https://raw.githubusercontent.com/poptracker-community/community-packlist/main/community-packs.json");
+    {
+    // "remote_pack_list_url": absent = never asked, "" = user declined, otherwise the URL
+    const auto it = _config.find("remote_pack_list_url");
+    if (it != _config.end() && it->is_string() && !it->get<std::string>().empty()) {
+        if (!_packManager->addRepository(it->get<std::string>()))
+            fprintf(stderr, "Warning: invalid remote_pack_list_url in config (https:// required)\n");
+        }
+    }
     // NOTE: signals are connected later to allow gui and non-gui interaction
 
 #ifndef WITHOUT_UPDATE_CHECK
@@ -456,6 +462,69 @@ PopTracker::PopTracker([[maybe_unused]] int argc, [[maybe_unused]] char** argv, 
 #endif
 
     StateManager::setDir(getConfigPath(APPNAME, "saves", _isPortable));
+}
+
+void PopTracker::promptRemotePackList()
+{
+    static constexpr char COMMUNITY_URL[] =
+        "https://raw.githubusercontent.com/poptracker-community/community-packlist/main/community-packs.json";
+
+    if (!Dlg::hasGUI()) return; // can't ask; try again next start
+
+    auto declined = [this]() {
+        _config["remote_pack_list_url"] = ""; // remember that we asked
+        saveConfig();
+        Dlg::MsgBox("PopTracker",
+                "No remote pack list was added.\n\n"
+                "To add one later, set \"remote_pack_list_url\" in PopTracker.json "
+                "to the address of a pack list (https://...) and restart PopTracker.\n"
+                "Remote packs will then be available through the \"Remote\" button in the pack list.",
+                Dlg::Buttons::OK, Dlg::Icon::Info);
+    };
+
+    auto res = Dlg::MsgBox("PopTracker",
+            "Do you want to use a remote pack list?\n\n"
+            "A remote pack list lets you browse and download packs from inside PopTracker. "
+            "PopTracker does not create, host or endorse the packs in any list.\n\n"
+            "The community pack list is suggested. Choose Yes to enter a list address "
+            "(leave it empty to use the community pack list).",
+            Dlg::Buttons::YesNo, Dlg::Icon::Question);
+    if (res != Dlg::Result::Yes) {
+        declined();
+        return;
+    }
+
+    std::string url;
+    while (true) {
+       url.clear();
+       if (!Dlg::InputBox("PopTracker",
+               "Enter the address of a pack list, or leave empty for the community pack list",
+               "", url)) {
+            declined(); // dialog cancelled
+            return;
+        }
+        strip(url);
+        if (url.empty()) url = COMMUNITY_URL;
+        if (_packManager->addRepository(url)) break;
+        Dlg::MsgBox("PopTracker", "The address has to start with https://",
+                Dlg::Buttons::OK, Dlg::Icon::Error);
+    }
+
+    _config["remote_pack_list_url"] = url;
+    saveConfig();
+
+    // validate in the background (needs the main loop to run); on failure, drop it and ask again next start
+    _packManager->testRepository(url, [this, url](bool valid) {
+       if (valid) return;
+        _packManager->clearRepositories();
+        _config.erase("remote_pack_list_url");
+        saveConfig();
+        Dlg::MsgBox("PopTracker",
+               "Could not load a valid pack list from:\n" + sanitize_print(url) + "\n\n"
+               "You will be asked again on the next start, or you can set "
+               "\"remote_pack_list_url\" in PopTracker.json.",
+               Dlg::Buttons::OK, Dlg::Icon::Error);
+    });
 }
 
 PopTracker::~PopTracker()
@@ -909,22 +978,24 @@ bool PopTracker::start()
         }
     }};
 
+    _win->onRemotePackVersionSelected += {this, [this](void*, const std::string& uid,
+            const std::string& version, const std::string& url, const std::string& sha256) {
+        const std::string name = _packManager->getAvailablePackName(uid);
+        const std::string msg = "Download " + name + " " + version + " from\n" + url + " ?";
+        if (Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) != Dlg::Result::Yes)
+            return;
+        const auto& installDir = getPackInstallDir();
+        fs::create_directories(installDir);
+        _packManager->downloadUpdate(url, installDir, uid, version, sha256);
+    }};
+
     // Connect pack manager to GUI
     _packManager->setConfirmationHandler([](const std::string& msg, auto cb) {
         cb(Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) == Dlg::Result::Yes);
     });
     _packManager->onUpdateAvailable += {this, [this](void*, const std::string& uid, const std::string& version, const std::string& url, const std::string& sha256) {
-        if (!_pack || _pack->getUID() != uid) {
-            if (version.empty() || url.empty() || sha256.empty()) return;
-            const std::string name = _packManager->getAvailablePackName(uid);
-            const std::string msg = "Install " + name + " from the community pack list?";
-            if (Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) == Dlg::Result::Yes) {
-                const auto& installDir = getPackInstallDir();
-                fs::create_directories(installDir);
-                _packManager->downloadUpdate(url, installDir, uid, version, sha256);
-            }
-            return;
-        }
+        if (!_pack || _pack->getUID() != uid)
+            return; // remote installs go through onRemotePackVersionSelected
         if (version.empty() || url.empty() || sha256.empty()) {
             printf("Invalid update information\n");
             return;
@@ -999,6 +1070,9 @@ bool PopTracker::start()
         else if (_win)
             _win->refreshPackList();
     }};
+
+    if (_config.find("remote_pack_list_url") == _config.end())
+        promptRemotePackList();
 
     _frameTimer = std::chrono::steady_clock::now();
     _fpsTimer = std::chrono::steady_clock::now();

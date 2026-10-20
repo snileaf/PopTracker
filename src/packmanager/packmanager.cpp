@@ -86,8 +86,21 @@ bool PackManager::checkForUpdate(const std::string& uid, const std::string& vers
         return false;
     }
     printf("PackManager: Checking for update for %s\n", sanitize_print(uid).c_str());
+    resolveVersionsUrl(uid, versions_url, [this, uid, version, cb, ncb](const std::string& url) {
+        if (url.empty()) {
+            if (ncb) ncb(uid);
+            return;
+        }
+        checkForUpdateFrom(uid, version, url, cb, ncb);
+    });
+    return true; // true = process started
+}
+
+void PackManager::resolveVersionsUrl(const std::string& uid, const std::string& versions_url,
+        std::function<void(const std::string&)> cb)
+{
     // 1. update repositories
-    updateRepositories([this, uid, version, versions_url, cb, ncb](bool) {
+    updateRepositories([this, uid, versions_url, cb](bool) {
         // 2. determine which versions_url to use
         std::string url = versions_url;
         auto it = _packs.find(uid);
@@ -99,44 +112,97 @@ bool PackManager::checkForUpdate(const std::string& uid, const std::string& vers
             }
         }
         if (url.empty()) {
-            printf("Nowhere to check for updates of %s\n", uid.c_str());
-            if (ncb) ncb(uid);
+            printf("Nowhere to check for updates of %s\n", sanitize_print(uid).c_str());
+            cb("");
             return;
         }
         // 3. if versions url is not secure, bail out
         std::string proto, host, port, path;
         if (!HTTP::parse_uri(url, proto, host, port, path)) {
             printf("Invalid versions URL: %s\n", sanitize_print(url).c_str());
-            if (ncb) ncb(uid);
+            cb("");
             return;
         }
         if (proto != "https" && (proto != "http" || host != "localhost" || (port != "" && port != "80"))) {
-            printf("Unsupported URL: %s. Please use HTTPS.\n",  sanitize_print(url).c_str());
-            if (ncb) ncb(uid);
+            printf("Unsupported URL: %s. Please use HTTPS.\n", sanitize_print(url).c_str());
+            cb("");
             return;
         }
         // 4. if host is not trusted, ask user
         if (_trustedHosts.find(host) != _trustedHosts.end()) {
-            // 5. fetch and check versions.json
-            checkForUpdateFrom(uid, version, url, cb, ncb);
+            cb(url);
         } else if (_untrustedHosts.find(host) == _untrustedHosts.end()) {
-            askConfirmation("Load update information from " + host + "?", [this, uid, version, url, host, cb, ncb](bool res){
+            askConfirmation("Load update information from " + host + "?", [this, url, host, cb](bool res) {
                 if (res) {
                     _trustedHosts.insert(host);
                     _conf["trusted_hosts"] = _trustedHosts;
                     saveConf();
-                    // 5. fetch and check versions.json
-                    checkForUpdateFrom(uid, version, url, cb, ncb);
-                }
-                else {
-                    // don't ask again until restart
-                    _untrustedHosts.insert(host);
-                    if (ncb) ncb(uid);
+                    cb(url);
+                } else {
+                    _untrustedHosts.insert(host); // don't ask again until restart
+                    cb("");
                 }
             });
+        } else {
+            cb("");
         }
     });
-    return true; // true = process started
+}
+
+void PackManager::getPackVersions(const std::string& uid, versions_callback cb)
+{
+    resolveVersionsUrl(uid, "", [this, cb](const std::string& url) {
+        if (url.empty()) {
+            cb(false, std::vector<RemoteVersion>{});
+            return;
+        }
+        GetCached(url, [this, url, cb](bool ok, std::string data) {
+            std::vector<RemoteVersion> out;
+            if (ok) {
+                try {
+                    auto j = json::parse(data);
+                    valijson::Validator validator;
+                    JsonSchemaAdapter jAdapter(j);
+                    if (!validator.validate(_versionSchema, jAdapter, nullptr))
+                        throw std::runtime_error("Json validation failed");
+                    for (auto& section : j["versions"]) {
+                        if (!section["download_url"].is_string())
+                            continue; // "null" = no download for this version
+                        RemoteVersion v;
+                        v.version = section["package_version"].get<std::string>();
+                        v.url = section["download_url"].get<std::string>();
+                        v.sha256 = section["sha256"].get<std::string>(); // required by schema if url is set
+                        if (v.version.empty() || v.url.empty() || v.sha256.empty())
+                            continue;
+                        for (const auto& line : section["changelog"])
+                            if (line.is_string()) v.changelog.push_back(line.get<std::string>());
+                        out.push_back(std::move(v));
+                    }
+                } catch (...) {
+                    printf("Invalid json versions %s\n", sanitize_print(url).c_str());
+                    ok = false;
+                    out.clear();
+                }
+            }
+            cb(ok, out);
+        });
+    });
+}
+
+void PackManager::testRepository(const std::string& url, std::function<void(bool)> cb)
+{
+    GetCached(url, [this, cb](bool ok, std::string data) {
+        bool valid = false;
+        if (ok) {
+            try {
+                auto j = json::parse(data);
+                valijson::Validator validator;
+                JsonSchemaAdapter jAdapter(j);
+                valid = validator.validate(_packsSchema, jAdapter, nullptr);
+            } catch (...) {}
+        }
+        cb(valid);
+    });
 }
 
 void PackManager::getAvailablePacks(std::function<void(const json&)> cb)
