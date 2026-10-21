@@ -29,10 +29,9 @@ public:
     using FONT = FontStore::FONT;
     LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore, Window *window=nullptr);
 
-    /// Full refresh (called when the widget is opened): rescans local packs, refetches remote list if shown.
     void update();
-    /// Rescan installed packs only (e.g. after a download finished). Keeps filter and mode.
     void updateInstalled();
+    void reloadRemoteLists();
     void setPackManager(PackManager* packManager) { _packManager = packManager; }
     void focusFilter();
     void releaseFilterFocus();
@@ -40,6 +39,8 @@ public:
     Signal<const fs::path&, const std::string&> onPackSelected;
     /// uid, version, download url, sha256
     Signal<const std::string&, const std::string&, const std::string&, const std::string&> onRemoteVersionSelected;
+
+    Signal<> onManageListsRequested;
 
     virtual void setSize(Size size) override; // TODO: have more intelligent hbox instead
 
@@ -57,6 +58,8 @@ protected:
     TextField *_filter = nullptr;
     Button *_btnClearFilter = nullptr;
     Button *_btnSwitchList = nullptr;
+    Button *_btnLists = nullptr;
+    int _btnBarHeight = 0;
     ImageButton *_btnOpenFolder = nullptr;
 
     ScrollVBox *_packs;
@@ -73,11 +76,15 @@ protected:
     bool _remoteLoaded = false;
     bool _remoteLoading = false;
     unsigned _remoteGen = 0; // invalidates stale async version requests
+    unsigned _remoteLoadGen = 0; // invalidates stale async pack list requests
 
     void refreshPacks();
     void setMode(Mode mode);
     void loadRemotePacks();
     void showRemoteVersions(const Pack::Info& pack);
+
+    static constexpr int BTN_SWITCH_WIDTH = 80;
+    static constexpr int BTN_LISTS_WIDTH = 64;
 
     static constexpr Color PACK_BG_DEFAULT = {32, 32, 32};
     static constexpr Color PACK_BG_ACTIVE = {32, 128, 32};

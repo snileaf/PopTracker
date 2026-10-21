@@ -1,4 +1,5 @@
 #include "packmanager.h"
+#include <algorithm>
 #include "../core/util.h"
 #include "../core/fileutil.h"
 #include "../core/version.h"
@@ -24,14 +25,46 @@ PackManager::~PackManager()
 {
 }
 
-void PackManager::updateRepository(const std::string& url, std::function<void(bool)> cb, bool alreadyModified)
+size_t PackManager::repositoryIndex(const std::string& url) const
 {
-    GetCached(url, [this, url, cb, alreadyModified](bool ok, std::string data)
+    for (size_t i = 0; i < _repositories.size(); i++)
+        if (_repositories[i].url == url) return i;
+    return _repositories.size(); // unknown = lowest priority
+}
+
+void PackManager::mergePacks(const std::string& url, const json& packs)
+{
+    const size_t priority = repositoryIndex(url);
+    int n = 0;
+    for (const auto& pair: packs.items()) {
+        // if the same uid is in multiple lists, the list that comes first wins
+        const auto src = _packSources.find(pair.key());
+        if (src != _packSources.end() && repositoryIndex(src->second) <= priority)
+            continue;
+        _packs[pair.key()] = pair.value();
+        _packSources[pair.key()] = url;
+        n++;
+    }
+    printf("Added %d packs from %s\n", n, url.c_str());
+}
+
+void PackManager::updateNextRepository(std::function<void(bool)> cb, bool modified)
+{
+    // download only once, in priority order
+    const auto next = std::find_if(_repositories.begin(), _repositories.end(),
+            [](const Repository& r) { return !r.fetched; });
+    if (next == _repositories.end()) {
+        cb(modified);
+        return;
+    }
+    const std::string url = next->url;
+    GetCached(url, [this, url, cb, modified](bool ok, std::string data)
     {
-        // complete handler (success or fail)
-        auto last = _repositories.find(url);
-        if (last != _repositories.end()) {
-            last->second = true; // don't retry even if failed
+        // complete handler (success or fail); the list of repositories may have changed in the meantime
+        const auto it = std::find_if(_repositories.begin(), _repositories.end(),
+                [&url](const Repository& r) { return r.url == url; });
+        if (it != _repositories.end()) {
+            it->fetched = true; // don't retry even if failed
             if (ok) {
                 try {
                     auto j = json::parse(data);
@@ -40,40 +73,19 @@ void PackManager::updateRepository(const std::string& url, std::function<void(bo
                     if (!validator.validate(_packsSchema, jAdapter, nullptr)) {
                         throw std::runtime_error("Json validation failed");
                     }
-                    int n = 0;
-                    for (auto& pair: j.items()) {
-                        _packs[pair.key()] = pair.value();
-                        n++;
-                    }
-                    printf("Added %d packs from %s\n", n, url.c_str());
+                    mergePacks(url, j);
                 } catch (...) {
                     printf("Invalid json from pack repository %s\n", url.c_str());
                 }
             }
-            last++;
         }
-        while (last != _repositories.end() && last->second) // download only once
-            last++;
-        if (last == _repositories.end()) {
-            cb(ok || alreadyModified); // all done
-        } else {
-            std::string nextURL = last->first;
-            updateRepository(nextURL, cb, ok || alreadyModified);
-        }
+        updateNextRepository(cb, ok || modified);
     });
 }
 
 void PackManager::updateRepositories(std::function<void(bool)> cb)
 {
-    auto first = _repositories.begin();
-    while (first != _repositories.end() && first->second) // download only once
-        first++;
-    if (first != _repositories.end()) {
-        auto firstURL = first->first;
-        updateRepository(firstURL, cb);
-    } else {
-        cb(false);
-    }
+    updateNextRepository(std::move(cb), false);
 }
 
 bool PackManager::checkForUpdate(const std::string& uid, const std::string& version, const std::string& versions_url,

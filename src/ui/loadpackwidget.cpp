@@ -96,15 +96,30 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
         }
     }};
 
-    // switches between local and remote list; text shows where it will take you
+    // switches between local and remote list
     auto btnSwitch = new Button(0,0,0,0, _font, "Remote");
     btnSwitch->setGrow(0,0);
-    btnSwitch->setMinSize({80, btnSwitch->getAutoHeight()+4});
+    _btnBarHeight = btnSwitch->getAutoHeight()+4;
+    btnSwitch->setMinSize({BTN_SWITCH_WIDTH, _btnBarHeight});
+    btnSwitch->setSize({BTN_SWITCH_WIDTH, _btnBarHeight});
     _btnSwitchList = btnSwitch;
 
     btnSwitch->onClick += {this, [this](void*, int, int, int button) {
         if (button == MouseButton::BUTTON_LEFT) {
             setMode(_mode == Mode::Local ? Mode::Remote : Mode::Local);
+        }
+    }};
+
+    // opens the remote pack list manager
+    auto btnLists = new Button(0,0,0,0, _font, "Lists");
+    btnLists->setGrow(0,0);
+    btnLists->setMinSize({BTN_LISTS_WIDTH, _btnBarHeight});
+    btnLists->setSize({BTN_LISTS_WIDTH, _btnBarHeight});
+    _btnLists = btnLists;
+
+    btnLists->onClick += {this, [this](void*, int, int, int button) {
+        if (button == MouseButton::BUTTON_LEFT) {
+            onManageListsRequested.emit(this);
         }
     }};
 
@@ -129,6 +144,7 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
     filterBar->setSpacing(4);
     filterBar->addChild(filter);
     filterBar->addChild(btnClear);
+    filterBar->addChild(btnLists);
     filterBar->addChild(btnSwitch);
     filterBar->addChild(btnOpenFolder);
     filterBar->setHeight(filter->getHeight());
@@ -152,6 +168,12 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
             }
         }
     }};
+}
+
+static std::string toLower(std::string s) {
+    for (auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
 }
 
 void LoadPackWidget::focusFilter()
@@ -189,11 +211,24 @@ void LoadPackWidget::setMode(Mode mode)
     if (mode == _mode) return;
     _mode = mode;
     _btnSwitchList->setText(_mode == Mode::Local ? "Remote" : "Local");
+    _btnSwitchList->setMinSize({BTN_SWITCH_WIDTH, _btnBarHeight});
+    _btnSwitchList->setSize({BTN_SWITCH_WIDTH, _btnBarHeight});
+    _filterBar->relayout();
     if (_filter) _filter->clear();
     if (_mode == Mode::Remote)
         loadRemotePacks();
     else
         refreshPacks();
+}
+
+void LoadPackWidget::reloadRemoteLists()
+{
+    ++_remoteLoadGen;
+    _remotePacks.clear();
+    _remoteLoaded = false;
+    _remoteLoading = false;
+    if (_mode == Mode::Remote)
+        loadRemotePacks();
 }
 
 void LoadPackWidget::loadRemotePacks()
@@ -204,7 +239,9 @@ void LoadPackWidget::loadRemotePacks()
     }
     _remoteLoading = true;
     refreshPacks(); // shows "Loading ..."
-    _packManager->refreshAvailablePacks([this](const nlohmann::json& packs) {
+    const unsigned gen = ++_remoteLoadGen;
+    _packManager->refreshAvailablePacks([this, gen](const nlohmann::json& packs) {
+        if (gen != _remoteLoadGen) return;
         _remoteLoading = false;
         _remoteLoaded = true;
         _remotePacks.clear();
@@ -218,16 +255,13 @@ void LoadPackWidget::loadRemotePacks()
             info.author = data.value("author", "");
             _remotePacks.push_back(std::move(info));
         }
+        std::sort(_remotePacks.begin(), _remotePacks.end(), [](const Pack::Info& a, const Pack::Info& b) {
+            const auto la = toLower(a.packName);
+            const auto lb = toLower(b.packName);
+            return la != lb ? la < lb : a.uid < b.uid;
+        });
         refreshPacks();
     });
-}
-
-// ASCII-only case folding, for case-insensitive substring matching.
-// Not true Unicode toLower, a dependency like ICU would be needed but heavy.
-static std::string toLower(std::string s) {
-    for (auto& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
 }
 
 void LoadPackWidget::showRemoteVersions(const Pack::Info& pack)
@@ -259,7 +293,8 @@ void LoadPackWidget::showRemoteVersions(const Pack::Info& pack)
 
     if (!_packManager) return;
     const std::string uid = pack.uid;
-    _packManager->getPackVersions(uid, [this, gen, uid, addMessage, finishLayout]
+    const std::string listName = _packManager->getAvailablePackListName(uid);
+    _packManager->getPackVersions(uid, [this, gen, uid, listName, addMessage, finishLayout]
             (bool ok, const std::vector<PackManager::RemoteVersion>& versions) {
         if (gen != _remoteGen) return; // user selected something else / list was rebuilt
         _curVariantLabel = nullptr;
@@ -268,7 +303,10 @@ void LoadPackWidget::showRemoteVersions(const Pack::Info& pack)
             addMessage(" No downloadable versions found.");
         } else {
             for (const auto& v : versions) {
-                auto lbl = new Label(0,0,0,0, _font, " " + v.version); // TODO: button instead of label
+                std::string versionText = " " + v.version;
+                if (!listName.empty())
+                    versionText += "  (" + listName + ")";
+                auto lbl = new Label(0,0,0,0, _font, versionText); // TODO: button instead of label
                 lbl->setGrow(1,0);
                 lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
                 lbl->setMinSize({64,lbl->getAutoHeight()});
@@ -399,7 +437,6 @@ void LoadPackWidget::refreshPacks()
             continue;
         }
 
-        // Local: hover-select variants, click to lock selection.
         row->onMouseEnter += {this, [this, pack, lbl, setRowBackground](void*, int, int, unsigned) {
             if (_curPackHover != lbl) {
                 if (_curPackHover == _curPackLabel && _disableHoverSelect)
@@ -485,8 +522,8 @@ void LoadPackWidget::refreshPacks()
             if (_remoteLoading)
                 msg = "Loading remote pack list...";
             else if (!_packManager || !_packManager->hasRepositories())
-                msg = "No remote pack list configured.\n"
-                      "Set \"remote_pack_list_url\" in PopTracker.json to add one.";
+                msg = "No remote pack lists enabled.\n"
+                      "Click \"Lists\" to select or add one.";
             else if (!_remotePacks.empty() || !filter.empty())
                 msg = "No packs found!";
             else
