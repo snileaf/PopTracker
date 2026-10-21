@@ -186,7 +186,7 @@ void RemoteListsWidget::addEntryRows(size_t i)
     row->addChild(text);
 
     if (!e.builtin) {
-        auto makeButton = [this, btnW](const char* caption) {
+        auto makeButton = [this](const char* caption) {
             auto b = new Button(0, 0, 0, 0, _font, caption);
             b->setGrow(0, 0);
             b->setMinSize({btnW, 32});

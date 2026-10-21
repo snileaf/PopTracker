@@ -503,7 +503,7 @@ void LoadPackWidget::refreshPacks()
             _main->relayout();
         }};
 
-        row->onClick += {this, [this, lbl, row, setRowBackground](void*, int, int, int button) {
+        row->onClick += {this, [this, row, setRowBackground](void*, int, int, int button) {
         if (button != MouseButton::BUTTON_LEFT)
                 return;
 
