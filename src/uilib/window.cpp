@@ -10,7 +10,7 @@
 
 namespace Ui {
 
-//#define DEFAULT_SCALE_QUALITY_HINT "1"
+#define DEFAULT_SCALE_QUALITY_HINT "1"
 
 Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const Size& size, const WindowConfig& config)
     : Container(0,0,600,400)
@@ -22,7 +22,7 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
     printf("Creating renderer ...");
     _win = SDL_CreateWindow(title,
             pos.left, pos.top,
-            _size.width, _size.height, SDL_WINDOW_RESIZABLE);
+            _size.width, _size.height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!_win) {
         printf(" error\n");
         fprintf(stderr, "Error creating window: %s\n", SDL_GetError());
@@ -42,6 +42,20 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
         fprintf(stderr, "Error creating renderer: %s\n", SDL_GetError());
         return;
     }
+
+    float ddpi = 96.0f, hdpi, vdpi;
+    int displayIndex = SDL_GetWindowDisplayIndex(_win);
+    if (SDL_GetDisplayDPI(displayIndex >= 0 ? displayIndex : 0, &ddpi, &hdpi, &vdpi) == 0) {
+        _windowScale = std::clamp(ddpi / 96.0f, 1.0f, 4.0f);
+    } else {
+        _windowScale = 1.0f;
+    }
+
+    if (_windowScale != 1.0f) {
+        SDL_SetWindowSize(_win, static_cast<int>(_size.width * _windowScale), static_cast<int>(_size.height * _windowScale));
+    }
+    // scale the renderer so all drawing commands are automatically enlarged
+    SDL_RenderSetScale(_ren, _windowScale, _windowScale);
 
     SDL_RendererInfo info;
     if (SDL_GetRendererInfo(_ren, &info) == 0) {
