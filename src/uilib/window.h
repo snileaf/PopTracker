@@ -59,7 +59,6 @@ protected:
     void showTooltip(Tooltip* tooltip, Position pos = Position::UNDEFINED);
     void showTooltip(const std::string& text, Position pos = Position::UNDEFINED);
 
-    bool _isAlwaysOnTop = false;
     float _windowScale = 1.0f;
 
 public:
@@ -103,7 +102,6 @@ public:
 
     Signal<int, int, DropType, std::string> onDrop; // x, y, type, data
 
-    Widget* getKeyboardFocus() const { return _keyboardFocus; }
 
     // Add the logical size converter
     Size physicalToLogicalSize(const Size& physicalSize) const {
