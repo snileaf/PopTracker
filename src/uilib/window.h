@@ -59,6 +59,9 @@ protected:
     void showTooltip(Tooltip* tooltip, Position pos = Position::UNDEFINED);
     void showTooltip(const std::string& text, Position pos = Position::UNDEFINED);
 
+    bool _isAlwaysOnTop = false;
+    float _windowScale = 1.0f;
+
 public:
     using ID = uint32_t;
     Window(const char *title, SDL_Surface* icon=nullptr, const Position& pos=WINDOW_DEFAULT_POSITION, const Size& size={0,0}, const WindowConfig& config={});
@@ -99,6 +102,17 @@ public:
     }
 
     Signal<int, int, DropType, std::string> onDrop; // x, y, type, data
+
+    Widget* getKeyboardFocus() const { return _keyboardFocus; }
+
+    // Add the logical size converter
+    Size physicalToLogicalSize(const Size& physicalSize) const {
+        if (_windowScale <= 0.0f) return physicalSize;
+        return {
+            static_cast<int>(physicalSize.width / _windowScale),
+            static_cast<int>(physicalSize.height / _windowScale)
+        };
+    }
 };
 
 } // namespace Ui
