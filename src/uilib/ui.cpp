@@ -125,13 +125,13 @@ int Ui::eventFilter(void* userdata, SDL_Event *ev)
     Ui* ui = (Ui*)userdata;
     if (ev->type == SDL_WINDOWEVENT) {
         if (ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-            if (!ui->_eventMutex.try_lock()) return 1; // already handling events, skip resize / push to list instead
+            if (!ui->_eventMutex.try_lock()) return 1;
             int x = ev->window.data1;
             int y = ev->window.data2;
             auto winit = ui->_windows.find(ev->window.windowID);
             if (winit != ui->_windows.end()) {
-                // NOTE: calls below may push new events, looping is disabled using the try_lock above
-                winit->second->setSize({x,y});
+                Size logicalSize = winit->second->physicalToLogicalSize({x, y});
+                winit->second->setSize(logicalSize);
                 winit->second->render();
             }
             ui->_eventMutex.unlock();
